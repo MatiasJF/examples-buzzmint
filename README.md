@@ -1,11 +1,11 @@
 # Internalizing unconfirmed outputs into a BRC-100 wallet
 
-A wallet can take custody of an output the instant it is created. It does not need to wait for a
-block. It does not need the transaction to have been broadcast at all.
+A wallet can take custody of an output the instant a miner accepts it. It does not need to wait for a
+block, a confirmation, or a merkle proof — none of which exist yet.
 
-These three examples show that, each in one file, with no framework. Every one of them internalizes
-first and broadcasts second — so you can watch custody happen *before* the network has any knowledge
-of the transaction.
+These three examples show that, each in one file, with no framework. Each one broadcasts, then
+internalizes the still-unmined transaction, and prints the resulting `unproven` status: held, spendable,
+and provably not confirmed.
 
 | File | Protocol | Shows |
 |---|---|---|
@@ -25,29 +25,51 @@ There is no proof for the transaction being handed over. There cannot be: it was
 The recipient does not need one. It walks the ancestry back to transactions that *are* proven,
 verifies those proofs against block headers it already trusts, and checks that the new transaction
 spends them validly. That is a complete SPV proof of validity, and none of it depends on the new
-transaction having been mined, or even seen by a miner.
+transaction having been mined.
 
-So the receiver can answer "are these coins real?" on its own, immediately. Confirmation answers a
-different question — "will these coins stay real?" — and that answer arrives later, on its own
-schedule.
+So the receiver can answer "is this transaction valid?" on its own, immediately, with no block and no
+proof. That is what makes internalizing an unconfirmed output reasonable.
+
+## Broadcast first, then internalize
+
+**SPV validity is not double-spend safety, and that distinction decides the ordering.**
+
+BEEF proves a transaction is well-formed and that its inputs existed. It cannot prove those inputs are
+still unspent, because that fact isn't in the transaction — it lives in the miners' mempools. A wallet
+will cheerfully internalize a transaction nobody has broadcast, and it will look exactly like a
+received payment. But until a miner accepts it, the sender can spend the same inputs elsewhere, and
+first-seen — the thing that actually secures a 0-conf payment — hasn't started. If nobody ever
+broadcasts it, it simply dies. Either way the output reads as held right up until it silently
+evaporates.
+
+So every example here broadcasts first and internalizes second. You lose nothing by doing this: an
+accepted transaction is still unmined, still has no merkle proof, and still internalizes as
+`unproven`. The demonstration is unaffected; only the risk goes away.
+
+The two questions are worth keeping apart:
+
+| Question | Answered by |
+|---|---|
+| Is this transaction valid? | BEEF, locally, instantly |
+| Can these inputs still be spent out from under me? | a miner accepting it — nothing else |
+
+Confirmation answers a third question — "will this stay true?" — and arrives later, on its own schedule.
 
 ## The lifecycle you'll see
 
-Each script prints its status at the moment of internalization, before broadcasting:
-
 ```
-                    ┌─ internalizeAction   → custody. status: unproven
-   no proof exists  ┤
-                    └─ broadcast           → the network learns of it. status: unproven
-                       (a block is mined)
-                       Monitor attaches the merkle proof → status: completed
+   broadcast              → a miner accepts it; inputs are locked to this tx
+   internalizeAction      → custody. status: unproven   ← no merkle proof exists yet
+   (a block is mined)
+   Monitor attaches proof → status: completed
 ```
 
-`unproven` is not a defect. It is the honest name for "valid, held, and not yet mined." Re-run
-`listActions` a few minutes after a script and you'll watch it flip to `completed` on its own.
+`unproven` is not a defect. It is the honest name for "valid, accepted, held, and not yet mined."
+Re-run `listActions` a few minutes after a script and you'll watch it flip to `completed` on its own.
 
 (`nosend` is a fourth status, for a tx deliberately never shared with the network. These examples
-don't use it — an unbroadcast tx never confirms, so its outputs would be permanent dead-ends.)
+don't use it — an unbroadcast tx never confirms, so its outputs are permanent dead-ends. It has real
+uses, but "someone paid me" is not one of them.)
 
 ## The two protocols
 

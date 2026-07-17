@@ -2,8 +2,9 @@
  * 3 — Certificates. Two different things share this word, and mixing them up wastes days.
  *
  *   (a) A certificate TOKEN — a real 1Sat Ordinal whose inscription IS the signed claim.
- *       It is a UTXO. It goes into a basket with 'basket insertion', before broadcast,
- *       exactly like the ordinal in example 2. The wallet holds a coin it cannot read.
+ *       It is a UTXO. It goes into a basket with 'basket insertion' while still
+ *       unconfirmed, exactly like the ordinal in example 2. The wallet holds a coin it
+ *       cannot read.
  *
  *   (b) A BRC-52 identity certificate — a signed set of fields about a subject, issued by
  *       a certifier. It is NOT a UTXO. It has no output, no basket, and no confirmation
@@ -46,7 +47,7 @@ const { network } = await wallet.getNetwork({})
 const broadcaster = new WhatsOnChainBroadcaster(network === 'mainnet' ? 'main' : 'test')
 
 // ═══════════════════════════════════════════════════════════════════════════
-// (a) Certificate as a real 1Sat Ordinal → basket insertion, before broadcast
+// (a) Certificate as a real 1Sat Ordinal → basket insertion, while unconfirmed
 // ═══════════════════════════════════════════════════════════════════════════
 
 // Inscribed to a key the wallet derives, so the credential is genuinely the holder's
@@ -112,13 +113,23 @@ await certTx.fee()
 await certTx.sign()
 
 const certTxid = certTx.id('hex')
+console.log('(a) certificate ordinal')
+
+// ── Broadcast first, internalize second ──────────────────────────────────────
+// The wallet would accept this before broadcast, but a credential whose transaction no
+// miner has accepted is not a credential you hold — the inputs can still be spent out
+// from under it. Get it accepted, then take custody. See 1-payment.ts for the full
+// reasoning; it matters most where there is a counterparty.
+const bc = await certTx.broadcast(broadcaster)
+if (bc.status === 'error') throw new Error(`broadcast rejected: ${bc.description}`)
+console.log('    1. broadcast:', certTxid, '— accepted by a miner')
 
 // listActions filters by label only — it has no txid filter and no ordering guarantee.
 // So label this run uniquely, or you end up reading some earlier run's action and
 // drawing conclusions from it.
 const runLabel = `demo-${certTxid.slice(0, 16)}`
 
-// Custody first, with no proof in existence.
+// Custody while it is still unmined: accepted, but no merkle proof exists yet.
 const tokenResult = await wallet.internalizeAction({
   tx: certTx.toAtomicBEEF(),
   outputs: [
@@ -144,17 +155,10 @@ const tokenResult = await wallet.internalizeAction({
   labels: ['buzzmint-demo', runLabel]
 })
 
-console.log('(a) certificate ordinal')
-console.log('    1. internalized:', tokenResult.accepted, '— network has not seen it yet')
+console.log('    2. internalized:', tokenResult.accepted, '— no merkle proof exists yet')
 
-const before = await wallet.listActions({ labels: [runLabel], limit: 1 })
-console.log('       status:', before.actions[0]?.status, '— held without a proof')
-
-// Always check this. A broadcast can be rejected, and a rejected transaction never
-// confirms — the wallet will eventually drop the output you thought you held.
-const bc = await certTx.broadcast(broadcaster)
-if (bc.status === 'error') throw new Error(`broadcast rejected: ${bc.description}`)
-console.log('    2. broadcast:', certTxid)
+const after = await wallet.listActions({ labels: [runLabel], limit: 1 })
+console.log('       status:', after.actions[0]?.status, '— held, unconfirmed')
 
 const { outputs } = await wallet.listOutputs({
   basket: BASKET,

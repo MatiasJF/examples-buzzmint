@@ -1,5 +1,5 @@
 /**
- * 2 — A real 1Sat Ordinal, internalized into a basket BEFORE it is broadcast.
+ * 2 — A real 1Sat Ordinal, internalized into a basket while still unconfirmed.
  *
  * This is a genuine 1Sat Ordinal: one satoshi, a real inscription envelope
  *
@@ -17,7 +17,7 @@
  *      and genuinely spendable later. customInstructions records the protocol and keyID
  *      needed to re-derive it — without that, custody of the coin is worthless.
  *
- * Order of events: internalize with no proof → broadcast → the proof arrives later.
+ * Order of events: broadcast → internalize with no proof → the proof arrives later.
  */
 
 import {
@@ -102,10 +102,21 @@ ordTx.addOutput({ lockingScript: new P2PKH().lock(senderAddress), change: true }
 await ordTx.fee()
 await ordTx.sign()
 
-// ── Receiver: take custody with no proof, before the network has ever seen it ──
-const atomicBeef = ordTx.toAtomicBEEF()
-
 const txid = ordTx.id('hex')
+
+// ── Broadcast first, internalize second ──────────────────────────────────────
+// The wallet would accept this before broadcast — BEEF proves validity without a merkle
+// proof. But an output whose transaction no miner has accepted can still be taken away
+// by a conflicting spend of the same inputs, and if nobody ever broadcasts it, it just
+// quietly dies. Get it accepted, then take custody. See 1-payment.ts for why this
+// ordering matters much more when there is a counterparty involved.
+const bc = await ordTx.broadcast(broadcaster)
+if (bc.status === 'error') throw new Error(`broadcast rejected: ${bc.description}`)
+console.log('1. broadcast:', txid, '— accepted by a miner')
+
+// ── Receiver: take custody while it is still unmined ─────────────────────────
+// Accepted but not in a block: no merkle proof exists, and none can yet.
+const atomicBeef = ordTx.toAtomicBEEF()
 
 // listActions filters by label only — it has no txid filter and no ordering guarantee.
 // So label this run uniquely, or you end up reading some earlier run's action and
@@ -137,17 +148,10 @@ const result = await wallet.internalizeAction({
   labels: ['buzzmint-demo', runLabel]
 })
 
-console.log('1. internalized:', result.accepted, '— network has not seen this tx yet')
+console.log('2. internalized:', result.accepted, '— no merkle proof exists for this tx')
 
-const before = await wallet.listActions({ labels: [runLabel], limit: 1 })
-console.log('   status:', before.actions[0]?.status, '— held without a proof')
-
-// ── Only now does it touch the chain ─────────────────────────────────────────
-// Always check this. A broadcast can be rejected, and a rejected transaction never
-// confirms — the wallet will eventually drop the output you thought you held.
-const bc = await ordTx.broadcast(broadcaster)
-if (bc.status === 'error') throw new Error(`broadcast rejected: ${bc.description}`)
-console.log('2. broadcast:', txid)
+const after = await wallet.listActions({ labels: [runLabel], limit: 1 })
+console.log('   status:', after.actions[0]?.status, '— held, unconfirmed')
 
 const { outputs } = await wallet.listOutputs({
   basket: BASKET,

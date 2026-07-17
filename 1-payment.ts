@@ -4,9 +4,13 @@
  * The sender here is NOT a wallet. It is a bare private key using @bsv/sdk, the way a
  * paying service would be. The receiver is a BRC-100 wallet.
  *
- * The payment transaction is never broadcast. It has no merkle proof and cannot have one.
- * The wallet takes custody of it anyway, because BEEF only requires proofs for MINED
- * ANCESTORS — never for the transaction being handed over.
+ * The payment is broadcast, then internalized while it is still unmined. It has no merkle
+ * proof and cannot have one yet. The wallet takes custody anyway, because BEEF only
+ * requires proofs for MINED ANCESTORS — never for the transaction being handed over.
+ *
+ * The ordering matters and is explained where it happens: for a payment you broadcast
+ * FIRST and internalize second. Unconfirmed is a risk you can reason about; unbroadcast
+ * is a payment that can be taken away from you.
  */
 
 import {
@@ -91,12 +95,32 @@ paymentTx.addOutput({ lockingScript: new P2PKH().lock(senderAddress), change: tr
 await paymentTx.fee()
 await paymentTx.sign()
 
-// Not broadcast. At this moment the transaction exists only in memory, and no proof
-// for it exists anywhere. That is the state the wallet is about to accept it in.
-const atomicBeef = paymentTx.toAtomicBEEF()
+const txid = paymentTx.id('hex')
+
+// ── Broadcast FIRST. This ordering is the point of this file. ────────────────
+//
+// It is tempting to internalize now and broadcast afterwards — the wallet will happily
+// accept it, because BEEF proves the transaction is valid without any merkle proof.
+//
+// Don't, not for a payment. SPV validity is not double-spend safety. BEEF proves this
+// transaction is well-formed and that its inputs existed. It cannot prove those inputs
+// are still unspent, because that fact isn't in the transaction — it lives in the
+// miners' mempools. Until a miner has accepted this, nothing stops the sender spending
+// the same inputs elsewhere, and first-seen protection (what actually secures a 0-conf
+// payment) hasn't started. A payment internalized before broadcast reads as received
+// right up until it silently evaporates.
+//
+// So: hand it to the network, and let a miner tell you it's good.
+const bc = await paymentTx.broadcast(broadcaster)
+if (bc.status === 'error') throw new Error(`broadcast rejected: ${bc.description}`)
+console.log('1. broadcast:', txid)
+console.log('   accepted by a miner — inputs are now locked to this tx')
 
 // ── Receiver ─────────────────────────────────────────────────────────────────
-const txid = paymentTx.id('hex')
+// The transaction is accepted but NOT mined: no block, no merkle proof, and none can
+// exist yet. That is what internalizeAction is taking on faith here, and it is fine —
+// unconfirmed is not the same risk as unbroadcast.
+const atomicBeef = paymentTx.toAtomicBEEF()
 
 // listActions filters by label only — it has no txid filter and no ordering guarantee.
 // So label this run uniquely, or you end up reading some earlier run's action and
@@ -116,20 +140,10 @@ const result = await wallet.internalizeAction({
   labels: ['buzzmint-demo', runLabel]
 })
 
-console.log('1. internalized:', result.accepted, '— network has not seen this tx yet')
+console.log('2. internalized:', result.accepted, '— no merkle proof exists for this tx')
 
-const before = await wallet.listActions({ labels: [runLabel], limit: 1 })
-console.log('   status:', before.actions[0]?.status, '— the coins are already yours')
-
-// ── Only now does it touch the chain ─────────────────────────────────────────
-// Custody happened first. Broadcasting is a separate, later event — and confirmation
-// is later still. The wallet Monitor will attach the merkle proof when the block lands,
-// moving this action to 'completed' on its own.
-// Always check this. A broadcast can be rejected, and a rejected transaction never
-// confirms — the wallet will eventually drop the output you thought you held.
-const bc = await paymentTx.broadcast(broadcaster)
-if (bc.status === 'error') throw new Error(`broadcast rejected: ${bc.description}`)
-console.log('2. broadcast:', txid)
+const after = await wallet.listActions({ labels: [runLabel], limit: 1 })
+console.log('   status:', after.actions[0]?.status, '— the coins are yours, unconfirmed')
 console.log('   funding txid:', fundingTxid)
 const woc = network === 'mainnet' ? 'whatsonchain.com' : 'test.whatsonchain.com'
 console.log('   view:', `https://${woc}/tx/${txid}`)
