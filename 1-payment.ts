@@ -7,10 +7,6 @@
  * The payment is broadcast, then internalized while it is still unmined. It has no merkle
  * proof and cannot have one yet. The wallet takes custody anyway, because BEEF only
  * requires proofs for MINED ANCESTORS — never for the transaction being handed over.
- *
- * The ordering matters and is explained where it happens: for a payment you broadcast
- * FIRST and internalize second. Unconfirmed is a risk you can reason about; unbroadcast
- * is a payment that can be taken away from you.
  */
 
 import {
@@ -97,20 +93,17 @@ await paymentTx.sign()
 
 const txid = paymentTx.id('hex')
 
-// ── Broadcast FIRST. This ordering is the point of this file. ────────────────
+// ── Broadcast FIRST, internalize second ─────────────────────────────────────
 //
-// It is tempting to internalize now and broadcast afterwards — the wallet will happily
-// accept it, because BEEF proves the transaction is valid without any merkle proof.
+// The wallet will accept this before broadcast — BEEF proves the transaction is valid
+// without any merkle proof. Don't, not for a payment.
 //
-// Don't, not for a payment. SPV validity is not double-spend safety. BEEF proves this
-// transaction is well-formed and that its inputs existed. It cannot prove those inputs
-// are still unspent, because that fact isn't in the transaction — it lives in the
-// miners' mempools. Until a miner has accepted this, nothing stops the sender spending
-// the same inputs elsewhere, and first-seen protection (what actually secures a 0-conf
-// payment) hasn't started. A payment internalized before broadcast reads as received
-// right up until it silently evaporates.
-//
-// So: hand it to the network, and let a miner tell you it's good.
+// SPV validity is not double-spend safety. BEEF proves this transaction is well-formed
+// and that its inputs existed. It cannot prove those inputs are still unspent, because
+// that fact isn't in the transaction — it lives in the miners' mempools. Until a miner
+// has accepted this, nothing stops the sender spending the same inputs elsewhere, and
+// first-seen protection (what actually secures a 0-conf payment) hasn't started. A
+// payment internalized before broadcast reads as received right up until it evaporates.
 const bc = await paymentTx.broadcast(broadcaster)
 if (bc.status === 'error') throw new Error(`broadcast rejected: ${bc.description}`)
 console.log('1. broadcast:', txid)

@@ -42,9 +42,8 @@ first-seen — the thing that actually secures a 0-conf payment — hasn't start
 broadcasts it, it simply dies. Either way the output reads as held right up until it silently
 evaporates.
 
-So every example here broadcasts first and internalizes second. You lose nothing by doing this: an
-accepted transaction is still unmined, still has no merkle proof, and still internalizes as
-`unproven`. The demonstration is unaffected; only the risk goes away.
+Broadcast first, internalize second. This costs nothing: an accepted transaction is still unmined,
+still has no merkle proof, and still internalizes as `unproven`.
 
 The two questions are worth keeping apart:
 
@@ -111,9 +110,8 @@ There is no per-app isolation. A basket is just a string, and every app talking 
 the same flat namespace. Insert into `stas-tokens` and your test data lands in with real holdings —
 `listOutputs` will hand you both, and nothing marks which is which except tags you chose yourself.
 
-This is not hypothetical; it happened while writing these examples. Everything here writes to
-`demo-buzzmint-`prefixed baskets, filters by tag, and matches on outpoint rather than trusting
-`outputs[0]`.
+So namespace your baskets. Everything here writes to `demo-buzzmint-`prefixed ones, filters by tag,
+and matches on outpoint rather than trusting `outputs[0]`.
 
 Use `relinquishOutput({ basket, output })` to remove something from a basket. It gives up the
 wallet's custody of that output; it does not spend or destroy it.
@@ -151,8 +149,6 @@ The wallet will prompt for permission on `internalizeAction` — that is `seekPe
 defaults to true.
 
 ## Traps worth knowing
-
-Each of these cost real time while writing these examples.
 
 **`randomizeOutputs` defaults to `true`.** `createAction` shuffles your outputs to make change harder
 to identify. If you assume `outputIndex: 0` without turning it off, your code works until it doesn't:
